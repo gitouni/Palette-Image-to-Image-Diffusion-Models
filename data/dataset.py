@@ -1,6 +1,7 @@
 import torch.utils.data as data
 from torchvision import transforms
 from PIL import Image
+import cv2
 import os
 import torch
 import numpy as np
@@ -29,34 +30,37 @@ def make_dataset(dir):
 
     return images
 
-def pil_loader(path):
-    return Image.open(path).convert('RGB')
+def pil_loader(path, mode='RGB'):
+    return Image.open(path).convert(mode)
 
 class InpaintDataset(data.Dataset):
-    def __init__(self, data_root, mask_config={}, data_len=-1, image_size=[256, 256], loader=pil_loader):
+    def __init__(self, data_root, mask_root="", mask_config={}, data_len=-1, image_size=[256, 256], loader=pil_loader):
         imgs = make_dataset(data_root)
         if data_len > 0:
             self.imgs = imgs[:int(data_len)]
         else:
             self.imgs = imgs
         self.tfs = transforms.Compose([
-                transforms.Resize((image_size[0], image_size[1])),
+                transforms.Resize((image_size[0], image_size[1])),  # height ,width
                 transforms.ToTensor(),
                 transforms.Normalize(mean=[0.5, 0.5, 0.5], std=[0.5,0.5, 0.5])
         ])
         self.loader = loader
         self.mask_config = mask_config
         self.mask_mode = self.mask_config['mask_mode']
+        if self.mask_mode == 'file' or self.mask_mode == "file_dilate":
+            assert(os.path.isdir(mask_root))
+            self.mask_root = mask_root
+            self.mask_files = list(sorted(os.listdir(mask_root)))
         self.image_size = image_size
 
     def __getitem__(self, index):
         ret = {}
-        path = self.imgs[index]
+        path:str = self.imgs[index]
         img = self.tfs(self.loader(path))
-        mask = self.get_mask()
+        mask = self.get_mask(index)
         cond_image = img*(1. - mask) + mask*torch.randn_like(img)
         mask_img = img*(1. - mask) + mask
-
         ret['gt_image'] = img
         ret['cond_image'] = cond_image
         ret['mask_image'] = mask_img
@@ -67,7 +71,7 @@ class InpaintDataset(data.Dataset):
     def __len__(self):
         return len(self.imgs)
 
-    def get_mask(self):
+    def get_mask(self, index:int):
         if self.mask_mode == 'bbox':
             mask = bbox2mask(self.image_size, random_bbox())
         elif self.mask_mode == 'center':
@@ -81,12 +85,19 @@ class InpaintDataset(data.Dataset):
             regular_mask = bbox2mask(self.image_size, random_bbox())
             irregular_mask = brush_stroke_mask(self.image_size, )
             mask = regular_mask | irregular_mask
-        elif self.mask_mode == 'file':
-            pass
+        elif self.mask_mode == 'file' or self.mask_mode == 'file_dilate':
+            mask_pil = cv2.imread(os.path.join(self.mask_root, self.mask_files[index]), cv2.IMREAD_GRAYSCALE)
+            mask_pil = cv2.resize(mask_pil, (self.image_size[1], self.image_size[0]), interpolation=cv2.INTER_AREA)
+            mask = np.zeros(self.image_size, dtype=np.uint8)
+            mask[mask_pil > 0] = 1
+            if self.mask_mode == 'file_dilate':
+                mask = cv2.dilate(mask, cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (3,3)))
+            mask = mask[...,None] # (H, W ,1)
         else:
             raise NotImplementedError(
                 f'Mask mode {self.mask_mode} has not been implemented.')
-        return torch.from_numpy(mask).permute(2,0,1)
+        
+        return torch.from_numpy(mask).permute(2,0,1).float()
 
 
 class UncroppingDataset(data.Dataset):
