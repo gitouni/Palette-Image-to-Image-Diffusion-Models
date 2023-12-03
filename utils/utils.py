@@ -108,11 +108,13 @@ def normxcorr2(template, image, mode="same"):
     image = fftconvolve(np.square(image), a1, mode=mode) - \
             np.square(fftconvolve(image, a1, mode=mode)) / (np.prod(template.shape))
     # Remove small machine precision errors after subtraction
-    image[np.where(image < 0)] = 0
+    image[image < 0] = 0
     template = np.sum(np.square(template))
-    out = out / np.sqrt(image * template)
+    den = np.sqrt(image * template)
+    valid_mask = den != 0
+    out[valid_mask] = out[valid_mask] / den[valid_mask]
     # Remove any divisions by 0 or very close to 0
-    out[np.where(np.logical_not(np.isfinite(out)))] = 0
+    out[~valid_mask] = 0
     return out
 
 
