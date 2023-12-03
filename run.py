@@ -17,6 +17,7 @@ def main_worker(gpu, ngpus_per_node, opt):
     if opt['distributed']:
         torch.cuda.set_device(int(opt['local_rank']))
         print('using GPU {} for training'.format(int(opt['local_rank'])))
+        print("npgus_per_node:{}".format(ngpus_per_node))
         torch.distributed.init_process_group(backend = 'nccl', 
             init_method = opt['init_method'],
             world_size = opt['world_size'], 
@@ -25,7 +26,7 @@ def main_worker(gpu, ngpus_per_node, opt):
         )
     '''set seed and and cuDNN environment '''
     torch.backends.cudnn.enabled = True
-    warnings.warn('You have chosen to use cudnn for accleration. torch.backends.cudnn.enabled=True')
+    # warnings.warn('You have chosen to use cudnn for accleration. torch.backends.cudnn.enabled=True')
     Util.set_seed(opt['seed'])
 
     ''' set logger '''
@@ -64,8 +65,8 @@ def main_worker(gpu, ngpus_per_node, opt):
         
 if __name__ == '__main__':
     parser = argparse.ArgumentParser()
-    parser.add_argument('-c', '--config', type=str, default='config/colorization_mirflickr25k.json', help='JSON file for configuration')
-    parser.add_argument('-p', '--phase', type=str, choices=['train','test'], help='Run train or test', default='train')
+    parser.add_argument('-c', '--config', type=str, default='config/mk_rand.json', help='JSON file for configuration')
+    parser.add_argument('-p', '--phase', type=str, choices=['train','test'], help='Run train or test', default='test')
     parser.add_argument('-b', '--batch', type=int, default=None, help='Batch size in every gpu')
     parser.add_argument('-gpu', '--gpu_ids', type=str, default=None)
     parser.add_argument('-d', '--debug', action='store_true')
