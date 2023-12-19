@@ -1,14 +1,17 @@
 import argparse
 import os
-import warnings
 import torch
 import torch.multiprocessing as mp
+from copy import copy
 
 from core.logger import VisualWriter, InfoLogger
 import core.praser as Praser
 import core.util as Util
 from data import define_dataloader
 from models import create_model, define_network, define_loss, define_metric
+from models.model import Palette
+
+
 
 def main_worker(gpu, ngpus_per_node, opt):
     """  threads running on each GPU """
@@ -26,6 +29,11 @@ def main_worker(gpu, ngpus_per_node, opt):
         )
     '''set seed and and cuDNN environment '''
     torch.backends.cudnn.enabled = True
+    if opt['phase'] == 'semi':
+        semi_mode = True
+        opt['phase'] = 'test'
+    else:
+        semi_mode = False
     # warnings.warn('You have chosen to use cudnn for accleration. torch.backends.cudnn.enabled=True')
     Util.set_seed(opt['seed'])
 
@@ -42,7 +50,7 @@ def main_worker(gpu, ngpus_per_node, opt):
     metrics = [define_metric(phase_logger, item_opt) for item_opt in opt['model']['which_metrics']]
     losses = [define_loss(phase_logger, item_opt) for item_opt in opt['model']['which_losses']]
 
-    model = create_model(
+    model:Palette = create_model(
         opt = opt,
         networks = networks,
         phase_loader = phase_loader,
@@ -57,20 +65,36 @@ def main_worker(gpu, ngpus_per_node, opt):
     try:
         if opt['phase'] == 'train':
             model.train()
-        else:
-            model.test()
+        elif opt['phase'] == 'test':
+            if not semi_mode:
+                model.test()
+            else:
+                new_opt = copy(opt)
+                update_dict = {
+                    "glob_fmt":"Out_*",
+                    "mask_config":{"mask_mode":"file_finetune"}
+                    }
+                new_opt['datasets']['train']['which_dataset']['args'].update(update_dict)
+                new_opt['phase'] = 'train'
+                model.update_loader(new_opt)
+                model.train()
+                model.update_loader(opt)
+                model.iter = 0
+                model.epoch = 0
+                model.test()
     finally:
         phase_writer.close()
         
         
 if __name__ == '__main__':
     parser = argparse.ArgumentParser()
-    parser.add_argument('-c', '--config', type=str, default='config/mk_rand.json', help='JSON file for configuration')
-    parser.add_argument('-p', '--phase', type=str, choices=['train','test'], help='Run train or test', default='test')
+    parser.add_argument('-c', '--config', type=str, default='config/nmk_rand.json', help='JSON file for configuration')
+    parser.add_argument('-p', '--phase', type=str, choices=['train','test','semi'], help='Run train, test or semi', default='train')
     parser.add_argument('-b', '--batch', type=int, default=None, help='Batch size in every gpu')
     parser.add_argument('-gpu', '--gpu_ids', type=str, default=None)
     parser.add_argument('-d', '--debug', action='store_true')
     parser.add_argument('-P', '--port', default='21012', type=str)
+    parser.add_argument("-rr","--recursive_refine",action="store_true")
 
     ''' parser configs '''
     args = parser.parse_args()
