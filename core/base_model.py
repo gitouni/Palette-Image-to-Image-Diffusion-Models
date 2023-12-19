@@ -8,10 +8,13 @@ import torch.nn as nn
 
 
 import core.util as Util
+from core.logger import InfoLogger, VisualWriter  # for highlight
+from data import define_dataloader
+
 CustomResult = collections.namedtuple('CustomResult', 'name result')
 
 class BaseModel():
-    def __init__(self, opt, phase_loader, val_loader, metrics, logger, writer):
+    def __init__(self, opt:dict, phase_loader, val_loader, metrics, logger:InfoLogger, writer:VisualWriter):
         """ init model with basic input, which are from __init__(**kwargs) function in inherited class """
         self.opt = opt
         self.phase = opt['phase']
@@ -35,6 +38,10 @@ class BaseModel():
         self.writer = writer
         self.results_dict = CustomResult([],[]) # {"name":[], "result":[]}
 
+    def update_loader(self, opt):
+        self.phase_loader, self.val_loader = define_dataloader(self.logger, opt)
+        self.logger.info("dataloader args have been updated.")
+    
     def train(self):
         while self.epoch <= self.opt['train']['n_epoch'] and self.iter <= self.opt['train']['n_iter']:
             self.epoch += 1
@@ -65,7 +72,8 @@ class BaseModel():
                         self.logger.info('{:5s}: {}\t'.format(str(key), value))
                 self.logger.info("\n------------------------------Validation End------------------------------\n\n")
         self.logger.info('Number of Epochs has reached the limit, End.')
-
+        
+        
     def test(self):
         pass
 

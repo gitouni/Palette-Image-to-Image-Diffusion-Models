@@ -57,7 +57,10 @@ class VisualWriter():
         self.result_dir = opt['path']['results']
         enabled = opt['train']['tensorboard']
         self.rank = opt['global_rank']
-
+        if 'save_suffix' in opt:
+            self.suffix = opt['save_suffix']
+        else:
+            self.suffix = ".bmp"
         self.writer = None
         self.selected_module = ""
 
@@ -99,9 +102,9 @@ class VisualWriter():
         self.iter = iter
 
     def save_images(self, results):
-        result_path = os.path.join(self.result_dir, self.phase)
-        os.makedirs(result_path, exist_ok=True)
-        result_path = os.path.join(result_path, str(self.epoch))
+        phase_path = os.path.join(self.result_dir, self.phase)
+        os.makedirs(phase_path, exist_ok=True)
+        result_path = os.path.join(phase_path, str(self.epoch))
         os.makedirs(result_path, exist_ok=True)
 
         ''' get names and corresponding images from results[OrderedDict] '''
@@ -109,10 +112,14 @@ class VisualWriter():
             names = results['name']
             outputs = Util.postprocess(results['result'])
             for i in range(len(names)): 
-                Image.fromarray(outputs[i]).save(os.path.join(result_path, names[i]))
+                Image.fromarray(outputs[i]).save(os.path.join(result_path, os.path.splitext(names[i])[0]+self.suffix))
         except:
             raise NotImplementedError('You must specify the context of name and result in save_current_results functions of model.')
 
+    @property
+    def result_path(self):
+        return os.path.join(self.result_dir, self.phase, str(self.epoch))
+    
     def close(self):
         self.writer.close()
         print('Close the Tensorboard SummaryWriter.')
