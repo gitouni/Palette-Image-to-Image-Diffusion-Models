@@ -5,7 +5,7 @@ import cv2
 import os
 import torch
 import numpy as np
-
+from pathlib import Path
 from .util.mask import (bbox2mask, brush_stroke_mask, get_irregular_mask, random_bbox, random_cropping_bbox)
 
 IMG_EXTENSIONS = [
@@ -34,8 +34,12 @@ def pil_loader(path, mode='RGB'):
     return Image.open(path).convert(mode)
 
 class InpaintDataset(data.Dataset):
-    def __init__(self, data_root, mask_root="", mask_config={}, data_len=-1, image_size=[256, 256], loader=pil_loader):
-        imgs = make_dataset(data_root)
+    def __init__(self, data_root, glob_fmt="", mask_root="", mask_config={}, data_len=-1, image_size=[256, 256], loader=pil_loader):
+        if not glob_fmt:
+            imgs = make_dataset(data_root)
+        else:
+            imgs = [str(path) for path in Path(data_root).glob(glob_fmt)]
+            imgs.sort()
         if data_len > 0:
             self.imgs = imgs[:int(data_len)]
         else:
@@ -48,7 +52,7 @@ class InpaintDataset(data.Dataset):
         self.loader = loader
         self.mask_config = mask_config
         self.mask_mode = self.mask_config['mask_mode']
-        if self.mask_mode == 'file' or self.mask_mode == "file_dilate":
+        if "file" in self.mask_mode:
             assert(os.path.isdir(mask_root))
             self.mask_root = mask_root
             self.mask_files = list(sorted(os.listdir(mask_root)))
@@ -72,6 +76,7 @@ class InpaintDataset(data.Dataset):
         return len(self.imgs)
 
     def get_mask(self, index:int):
+        mask_transfer = lambda mask: torch.from_numpy(mask).permute(2,0,1).float()
         if self.mask_mode == 'bbox':
             mask = bbox2mask(self.image_size, random_bbox())
         elif self.mask_mode == 'center':
@@ -85,19 +90,30 @@ class InpaintDataset(data.Dataset):
             regular_mask = bbox2mask(self.image_size, random_bbox())
             irregular_mask = brush_stroke_mask(self.image_size, )
             mask = regular_mask | irregular_mask
-        elif self.mask_mode == 'file' or self.mask_mode == 'file_dilate':
+        elif 'file' in self.mask_mode:
             mask_pil = cv2.imread(os.path.join(self.mask_root, self.mask_files[index]), cv2.IMREAD_GRAYSCALE)
             mask_pil = cv2.resize(mask_pil, (self.image_size[1], self.image_size[0]), interpolation=cv2.INTER_AREA)
             mask = np.zeros(self.image_size, dtype=np.uint8)
             mask[mask_pil > 0] = 1
-            if self.mask_mode == 'file_dilate':
+            if self.mask_mode == 'file':
+                pass
+            elif self.mask_mode == 'file_dilate':
                 mask = cv2.dilate(mask, cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (3,3)))
-            mask = mask[...,None] # (H, W ,1)
+            elif self.mask_mode == 'file_finetune':
+                dilated_mask = cv2.dilate(mask, cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (5,5)),iterations=2)
+                mask = np.logical_and(dilated_mask, np.logical_not(mask))
+            else:
+                raise NotImplementedError(
+                    f'Mask mode {self.mask_mode} has not been implemented.')
+            mask = mask[...,None]  # (H, W ,1)
+            # if self.mask_mode == 'file_finetune':
+            #     mask = np.concatenate((mask, finetune_mask), axis=-1)  # (H, W ,1)
         else:
             raise NotImplementedError(
                 f'Mask mode {self.mask_mode} has not been implemented.')
-        
-        return torch.from_numpy(mask).permute(2,0,1).float()
+        # if self.mask_mode == 'file_finetune':
+        #     return mask_transfer(finetune_mask), mask_transfer(mask)
+        return mask_transfer(mask)
 
 
 class UncroppingDataset(data.Dataset):
@@ -150,7 +166,7 @@ class UncroppingDataset(data.Dataset):
         else:
             raise NotImplementedError(
                 f'Mask mode {self.mask_mode} has not been implemented.')
-        return torch.from_numpy(mask).permute(2,0,1)
+        return torch.from_numpy(mask).permute(2,0,1)  # (H, W ,C) - > (C, H ,W)
 
 
 class ColorizationDataset(data.Dataset):
