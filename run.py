@@ -31,7 +31,7 @@ def main_worker(gpu, ngpus_per_node, opt):
     torch.backends.cudnn.enabled = True
     if opt['phase'] == 'semi':
         semi_mode = True
-        opt['phase'] = 'test'
+        opt['phase'] = 'train'
     else:
         semi_mode = False
     # warnings.warn('You have chosen to use cudnn for accleration. torch.backends.cudnn.enabled=True')
@@ -65,23 +65,16 @@ def main_worker(gpu, ngpus_per_node, opt):
     try:
         if opt['phase'] == 'train':
             model.train()
-        elif opt['phase'] == 'test':
-            if not semi_mode:
-                model.test()
-            else:
-                new_opt = copy(opt)
-                update_dict = {
-                    "glob_fmt":"Out_*",
-                    "mask_config":{"mask_mode":"file_finetune"}
-                    }
-                new_opt['datasets']['train']['which_dataset']['args'].update(update_dict)
-                new_opt['phase'] = 'train'
-                model.update_loader(new_opt)
-                model.train()
+            if semi_mode:
+                opt['phase'] = 'test'
                 model.update_loader(opt)
                 model.iter = 0
                 model.epoch = 0
                 model.test()
+        elif opt['phase'] == 'test':
+            model.test()
+        else:
+            raise NotImplementedError("phase {} not implemented.".format(opt['phase']))
     finally:
         phase_writer.close()
         
