@@ -3,6 +3,9 @@ import tqdm
 from core.base_model import BaseModel
 from core.logger import LogTracker
 import copy
+from core.util import patch2img
+from pytorch_warmup import LinearWarmup
+
 class EMA():
     def __init__(self, beta=0.9999):
         super().__init__()
@@ -39,6 +42,10 @@ class Palette(BaseModel):
 
         self.optG = torch.optim.Adam(list(filter(lambda p: p.requires_grad, self.netG.parameters())), **optimizers[0])
         self.optimizers.append(self.optG)
+        if len(optimizers) > 1:
+            self.warmup_lr = LinearWarmup(self.optG, **optimizers[1])
+        else:
+            self.warmup_lr = None
         self.resume_training() 
 
         if self.opt['distributed']:
@@ -56,7 +63,7 @@ class Palette(BaseModel):
         self.sample_num = sample_num
         self.task = task
         
-    def set_input(self, data):
+    def set_input(self, data:dict):
         ''' must use set_device in tensor '''
         self.cond_image = self.set_device(data.get('cond_image'))
         self.gt_image = self.set_device(data.get('gt_image'))
@@ -100,14 +107,55 @@ class Palette(BaseModel):
 
         self.results_dict = self.results_dict._replace(name=ret_path, result=ret_result)
         return self.results_dict._asdict()
+    
+    def save_output(self):
+        ret_path = []
+        ret_result = []
+        for idx in range(self.batch_size):
+            ret_path.append('Out_{}'.format(self.path[idx]))
+            ret_result.append(self.output[idx].detach().float().cpu())
+        
+        self.results_dict = self.results_dict._replace(name=ret_path, result=ret_result)
+        return self.results_dict._asdict()
+    
+    def save_patch_output(self, file_indices, patch_indices):
+        if not hasattr(self, 'buffer_dict'):
+            self.buffer_dict = dict()
+        assert len(self.output) == len(file_indices) == len(patch_indices)
+        for batch_idx, (file_idx, patch_idx) in enumerate(zip(file_indices, patch_indices)):
+            if file_idx not in self.buffer_dict:
+                self.buffer_dict[file_idx] = dict(path=self.path[batch_idx])
+                self.buffer_dict[file_idx]['patch'] = []
+                self.buffer_dict[file_idx]['patch_idx'] = []
+            self.buffer_dict[file_idx]['patch_idx'].append(patch_idx)
+            self.buffer_dict[file_idx]['patch'].append(self.output[batch_idx].detach().float().cpu())
+        ret_path = []
+        ret_result = []
+        buffer_dict_fileindex = list(self.buffer_dict.keys())
+        for file_idx in buffer_dict_fileindex:
+            if len(self.buffer_dict[file_idx]['patch']) == self.patch_num:
+                Hindex, Windex = zip(*self.patch_idx)
+                patch_list = [self.buffer_dict[file_idx]['patch'][idx] for idx in self.buffer_dict[file_idx]['patch_idx']]
+                if patch_list[0].ndim == 3:
+                    target_img_size = [3] + list(self.target_img_size)
+                else:
+                    target_img_size = self.target_img_size
+                output = patch2img(patch_list, Hindex, Windex, target_img_size)
+                ret_path.append('Out_{}'.format(self.buffer_dict[file_idx]['path']))
+                ret_result.append(output)
+                self.buffer_dict.pop(file_idx)
+        if len(self.buffer_dict.keys()) > 100:
+            raise RuntimeError("Too many uncompleted patches.")
+        return dict(name=ret_path, result=ret_result)
 
     def train_step(self):
         self.netG.train()
         self.train_metrics.reset()
         for train_data in tqdm.tqdm(self.phase_loader):
             self.set_input(train_data)
+            self.optG.param_groups['lr']
             self.optG.zero_grad()
-            loss = self.netG(self.gt_image, self.cond_image, mask=self.mask)
+            loss = self.netG(self.gt_image, self.cond_image, mask=self.mask)  # forward
             loss.backward()
             self.optG.step()
 
@@ -123,6 +171,9 @@ class Palette(BaseModel):
             if self.ema_scheduler is not None:
                 if self.iter > self.ema_scheduler['ema_start'] and self.iter % self.ema_scheduler['ema_iter'] == 0:
                     self.EMA.update_model_average(self.netG_EMA, self.netG)
+            if self.warmup_lr is not None:
+                with self.warmup_lr.dampening():
+                    pass
 
         for scheduler in self.schedulers:
             scheduler.step()
@@ -198,6 +249,45 @@ class Palette(BaseModel):
         ''' print logged informations to the screen and tensorboard ''' 
         for key, value in test_log.items():
             self.logger.info('{:5s}: {}\t'.format(str(key), value))
+
+    def patch_test(self):
+        self.netG.eval()
+        self.test_metrics.reset()
+        with torch.no_grad():
+            for phase_data in tqdm.tqdm(self.phase_loader):
+                self.set_input(phase_data)
+                if self.opt['distributed']:
+                    if self.task in ['inpainting','uncropping']:
+                        self.output = self.netG.module.restoration(self.cond_image, y_t=self.cond_image, 
+                            y_0=self.gt_image, mask=self.mask, sample_num=self.sample_num, return_visuals=False)
+                    else:
+                        self.output = self.netG.module.restoration(self.cond_image, sample_num=self.sample_num, return_visuals=False)
+                else:
+                    if self.task in ['inpainting','uncropping']:
+                        self.output = self.netG.restoration(self.cond_image, y_t=self.cond_image, 
+                            y_0=self.gt_image, mask=self.mask, sample_num=self.sample_num, return_visuals=False)
+                    else:
+                        self.output = self.netG.restoration(self.cond_image, sample_num=self.sample_num, return_visuals=False)
+                        
+                self.iter += self.batch_size
+                self.writer.set_iter(self.epoch, self.iter, phase='test')
+                for met in self.metrics:
+                    key = met.__name__
+                    value = met(self.gt_image, self.output)
+                    self.test_metrics.update(key, value)
+                    self.writer.add_scalar(key, value)
+                for key, value in self.get_current_visuals(phase='test').items():
+                    self.writer.add_images(key, value)
+                self.writer.save_images(self.save_patch_output(phase_data['file_index'], phase_data['patch_idx']))
+        
+        test_log = self.test_metrics.result()
+        ''' save logged informations into log dict ''' 
+        test_log.update({'epoch': self.epoch, 'iters': self.iter})
+
+        ''' print logged informations to the screen and tensorboard ''' 
+        for key, value in test_log.items():
+            self.logger.info('{:5s}: {}\t'.format(str(key), value))
+
 
     def load_networks(self):
         """ save pretrained model and training state, which only do on GPU 0. """
