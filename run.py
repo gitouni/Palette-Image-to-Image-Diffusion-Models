@@ -2,7 +2,6 @@ import argparse
 import os
 import torch
 import torch.multiprocessing as mp
-from copy import copy
 
 from core.logger import VisualWriter, InfoLogger
 import core.praser as Praser
@@ -10,7 +9,7 @@ import core.util as Util
 from data import define_dataloader
 from models import create_model, define_network, define_loss, define_metric
 from models.model import Palette
-
+from data.dataset import PatchInapintDataset
 
 
 def main_worker(gpu, ngpus_per_node, opt):
@@ -62,6 +61,10 @@ def main_worker(gpu, ngpus_per_node, opt):
     )
 
     phase_logger.info('Begin model {}.'.format(opt['phase']))
+    if isinstance(phase_loader.dataset, PatchInapintDataset):
+        setattr(model, 'patch_idx', phase_loader.dataset.patch_idx)
+        setattr(model, 'patch_num', phase_loader.dataset.patch_num)
+        setattr(model, 'target_img_size', phase_loader.dataset.image_size)
     try:
         if opt['phase'] == 'train':
             model.train()
@@ -72,7 +75,10 @@ def main_worker(gpu, ngpus_per_node, opt):
                 model.epoch = 0
                 model.test()
         elif opt['phase'] == 'test':
-            model.test()
+            if isinstance(phase_loader.dataset, PatchInapintDataset):
+                model.patch_test()
+            else:
+                model.test()
         else:
             raise NotImplementedError("phase {} not implemented.".format(opt['phase']))
     finally:
