@@ -8,7 +8,12 @@ import numpy as np
 from pathlib import Path
 from queue import Queue
 from .util.mask import (bbox2mask, brush_stroke_mask, get_irregular_mask, random_bbox, random_cropping_bbox)
-from ..core.util import patchidx, img2patch, patch2img
+import sys
+sys.path.append(os.path.join("..", os.path.dirname(__file__)))
+sys.path.append(os.path.join("../..", os.path.dirname(__file__)))
+from core.util import patchidx
+
+
 IMG_EXTENSIONS = [
     '.jpg', '.JPG', '.jpeg', '.JPEG',
     '.png', '.PNG', '.ppm', '.PPM', '.bmp', '.BMP',
@@ -206,13 +211,16 @@ class PatchInapintDataset(InpaintDataset):
     def __getitem__(self, index):
         file_index = int(index / self.patch_num)
         ret = {}
+        ret['file_index'] = file_index
+        ret['patch_idx'] = index % self.patch_num
         if file_index not in self.buffer.keys():
             path:str = self.imgs[index]
             img = self.tfs(self.loader(path))
-            mask = self.get_mask(index)
+            mask = self.get_mask(index) 
             cond_image = img*(1. - mask) + mask*torch.randn_like(img)
             mask_img = img*(1. - mask) + mask
-            self.buffer[file_index] = dict(img=img, cond=cond_image, mask=mask, mask_img=mask_img, path=path.rsplit("/")[-1].rsplit("\\")[-1])
+            path = path.rsplit("/")[-1].rsplit("\\")[-1]
+            self.buffer[file_index] = dict(img=img, cond=cond_image, mask=mask, mask_img=mask_img, path=path)
             self.idx_buffer.put(file_index)
             if self.idx_buffer.full():
                 removed_idx = self.idx_buffer.get(timeout=1.0)
@@ -220,11 +228,13 @@ class PatchInapintDataset(InpaintDataset):
         else:
             cache = self.buffer[file_index]
             img, cond_image, mask, mask_img, path = cache['img'], cache['cond'], cache['mask'], cache['mask_img'], cache['path']
-        hidx, widx = self.patch_idx[index % self.patch_num]
-        ret['gt_image'] = img[...,hidx:hidx+self.patch_size[0], widx:widx+self.patch_size[1]]
-        ret['cond_image'] = cond_image[...,hidx:hidx+self.patch_size[0], widx:widx+self.patch_size[1]]
-        ret['mask_image'] = mask_img[...,hidx:hidx+self.patch_size[0], widx:widx+self.patch_size[1]]
-        ret['mask'] = mask[...,hidx:hidx+self.patch_size[0], widx:widx+self.patch_size[1]]
+        hidx, widx = self.patch_idx[ret['patch_idx']]
+        dh = self.patch_size[0]
+        dw = self.patch_size[1]
+        ret['gt_image'] = img[...,hidx:hidx+dh, widx:widx+dw]
+        ret['cond_image'] = cond_image[...,hidx:hidx+dh, widx:widx+dw]
+        ret['mask_image'] = mask_img[...,hidx:hidx+dh, widx:widx+dw]
+        ret['mask'] = mask[...,hidx:hidx+dh, widx:widx+dw]
         ret['path'] = path
         return ret
     
@@ -269,6 +279,18 @@ class PatchInapintDataset(InpaintDataset):
         # if self.mask_mode == 'file_finetune':
         #     return mask_transfer(finetune_mask), mask_transfer(mask)
         return mask_transfer(mask)
+    
+    @staticmethod
+    def collate_fn(batch):
+        return {
+            'gt_image': torch.stack([x['gt_image'] for x in batch]),
+            'cond_image': torch.stack([x['cond_image'] for x in batch]),
+            'mask_image': torch.stack([x['mask_image'] for x in batch]),
+            'mask': torch.stack([x['mask'] for x in batch]),
+            'path': [x['path'] for x in batch],
+            'file_index': [x['file_index'] for x in batch],
+            'patch_idx': [x['patch_idx'] for x in batch]
+        }
 
 class UncroppingDataset(data.Dataset):
     def __init__(self, data_root, mask_config={}, data_len=-1, image_size=[256, 256], loader=pil_loader):
