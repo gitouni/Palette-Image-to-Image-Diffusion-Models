@@ -4,7 +4,33 @@ import math
 import torch
 from torch.nn.parallel import DistributedDataParallel as DDP
 from torchvision.utils import make_grid
+from typing import List, Tuple, Union
 
+def patchidx(target_size:Union[List[int], Tuple[int]], patch_size:Union[List[int], Tuple[int]]):
+    Hindex = list(range(0, target_size[0], patch_size[0]))
+    Windex = list(range(0, target_size[1], patch_size[1]))
+    Hindex[-1] = target_size[0] - patch_size[0]
+    Windex[-1] = target_size[1] - patch_size[1]
+    return Hindex, Windex
+
+def img2patch(img:torch.Tensor, patch_size:(256, 256)) -> List[torch.Tensor]:
+	if len(img.shape) == 3:
+		H, W = img.shape[1], img.shape[0]
+	elif len(img.shape) == 2:
+		H, W = img.shape[0], img.shape[1]
+	Hindex, Windex = patchidx((H,W), patch_size)
+	patches = []
+	for hi in Hindex:
+		for wi in Windex:
+			patches.append(img[...,hi:hi+256, wi:wi+256])
+	return patches
+
+def patch2img(patches:List[torch.Tensor], Hindex:List[int], Windex:List[int], target_size:Tuple[int]) -> torch.Tensor:
+    img = torch.zeros(target_size).to(patches[0])
+    for patch_idx, (hi,wi) in enumerate(zip(Hindex, Windex)):
+        img[...,hi:hi+256, wi:wi+256] = patches[patch_idx]
+    return img
+            
 
 def tensor2img(tensor, out_type=np.uint8, min_max=(-1, 1)):
     '''
