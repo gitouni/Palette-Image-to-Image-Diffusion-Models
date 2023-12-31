@@ -214,7 +214,7 @@ class PatchInapintDataset(InpaintDataset):
         ret['file_index'] = file_index
         ret['patch_idx'] = index % self.patch_num
         if file_index not in self.buffer.keys():
-            path:str = self.imgs[index]
+            path:str = self.imgs[file_index]
             img = self.tfs(self.loader(path))
             mask = self.get_mask(index) 
             cond_image = img*(1. - mask) + mask*torch.randn_like(img)
