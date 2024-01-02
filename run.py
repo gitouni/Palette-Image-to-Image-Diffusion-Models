@@ -73,7 +73,13 @@ def main_worker(gpu, ngpus_per_node, opt):
                 model.update_loader(opt)
                 model.iter = 0
                 model.epoch = 0
-                model.test()
+                if isinstance(model.phase_loader.dataset, PatchInapintDataset):
+                    setattr(model, 'patch_idx', model.phase_loader.dataset.patch_idx)
+                    setattr(model, 'patch_num', model.phase_loader.dataset.patch_num)
+                    setattr(model, 'target_img_size', model.phase_loader.dataset.image_size)
+                    model.patch_test()
+                else:
+                    model.test()
         elif opt['phase'] == 'test':
             if isinstance(phase_loader.dataset, PatchInapintDataset):
                 model.patch_test()
