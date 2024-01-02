@@ -100,5 +100,3 @@ def set_device(args, distributed=False, rank=0):
 			args = set_gpu(args, distributed, rank)
 	return args
 
-
-
