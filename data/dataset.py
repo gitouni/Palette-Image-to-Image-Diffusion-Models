@@ -106,24 +106,39 @@ class InpaintDataset(data.Dataset):
             mask[mask_pil > 0] = 1
             dilate_size = self.mask_config['mask_dilate']['size']
             dilate_iter = self.mask_config['mask_dilate']['iteration']
+            
             if self.mask_mode == 'file':
                 pass
             elif self.mask_mode == 'file_dilate':
+                dilate_size = self.mask_config['mask_dilate']['size']
+                dilate_iter = self.mask_config['mask_dilate']['iteration']
                 mask = cv2.dilate(mask, cv2.getStructuringElement(cv2.MORPH_ELLIPSE, dilate_size), iterations=dilate_iter)
-            elif self.mask_mode == 'file_finetune':
+            elif self.mask_mode == 'file_dilate_delta':
+                dilate_size = self.mask_config['mask_dilate']['size']
+                dilate_iter = self.mask_config['mask_dilate']['iteration']
                 dilated_mask = cv2.dilate(mask, cv2.getStructuringElement(cv2.MORPH_ELLIPSE, dilate_size), iterations=dilate_iter)
-                mask = np.logical_and(dilated_mask, np.logical_not(mask))
+                mask = np.logical_and(dilated_mask, np.logical_not(mask))  # set subtraction
+            elif self.mask_mode == "file_offset":
+                offset = self.mask_config['mask_offset']
+                mask_yx = np.nonzero(mask)
+                new_mask_x = mask_yx[1] + offset[0]
+                new_mask_y = mask_yx[0] + offset[1]
+                h, w = mask.shape[:2]
+                rev = (new_mask_x >=0) * (new_mask_x < w) * (new_mask_y >=0) * (new_mask_y < h)
+                new_mask_x = new_mask_x[rev]
+                new_mask_y = new_mask_y[rev]
+                new_mask = np.zeros_like(mask)  # uint8
+                new_mask[new_mask_y, new_mask_x] = 1
+                mask = np.logical_and(new_mask, np.logical_not(mask))  # set subtraction
             else:
                 raise NotImplementedError(
                     f'Mask mode {self.mask_mode} has not been implemented.')
             mask = mask[...,None]  # (H, W ,1)
-            # if self.mask_mode == 'file_finetune':
-            #     mask = np.concatenate((mask, finetune_mask), axis=-1)  # (H, W ,1)
+
         else:
             raise NotImplementedError(
                 f'Mask mode {self.mask_mode} has not been implemented.')
-        # if self.mask_mode == 'file_finetune':
-        #     return mask_transfer(finetune_mask), mask_transfer(mask)
+
         return mask_transfer(mask)
 
 class CropInpaintDataset(InpaintDataset):
@@ -159,7 +174,7 @@ class CropInpaintDataset(InpaintDataset):
         return super().get_mask(index, resize=False)
     
 class PatchInapintDataset(InpaintDataset):
-    def __init__(self, data_root, glob_fmt="", mask_root="", mask_config={}, data_len=-1, buffer_size=5, image_size=[256, 256], loader=pil_loader):
+    def __init__(self, data_root, glob_fmt="", mask_root="", mask_config={}, data_len=-1, buffer_size=5, image_size=[256, 256], overlap=[30,30], loader=pil_loader):
         super().__init__(data_root, glob_fmt, mask_root, mask_config, data_len, image_size, loader)
         self.tfs = transforms.Compose([
                 transforms.ToTensor(),
@@ -168,7 +183,7 @@ class PatchInapintDataset(InpaintDataset):
         ex_img = pil_loader(self.imgs[0])
         self.image_size = ex_img.height, ex_img.width
         self.patch_size = image_size
-        self.patch_hidx, self.patch_widx = patchidx(self.image_size, self.patch_size)
+        self.patch_hidx, self.patch_widx = patchidx(self.image_size, self.patch_size, overlap)
         self.patch_idx = []
         for hidx in self.patch_hidx:
             for widx in self.patch_widx:
