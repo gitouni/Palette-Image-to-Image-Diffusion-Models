@@ -29,7 +29,14 @@ from scipy.ndimage.filters import maximum_filter, minimum_filter
 from scipy import ndimage
 from scipy.signal import fftconvolve
 
+import os
+import shutil
 
+def refresh_dir(dirname:str):
+    if os.path.exists(dirname):
+        shutil.rmtree(dirname)
+    os.makedirs(dirname)
+    
 def poisson_reconstruct(grady, gradx, boundarysrc):
 	# Thanks to Dr. Ramesh Raskar for providing the original matlab code from which this is derived
 	# Dr. Raskar's version is available here: http://web.media.mit.edu/~raskar/photo/code.pdf
@@ -146,6 +153,28 @@ def find_marker(frame, mask_range=(144, 255), gkern_length=5, gkern_sig=1.5):
 
     return mask
 
+def find_marker2(frame, mask_range=(144, 255), dilate_size=5, dilate_iter=1, k1=(3,3),k2=(15,15)):
+    """find markers in the tactile iamge
+
+    Args:
+        frame (`np.ndarray`): raw image
+        mask_range (tuple, optional): range of guassian difference. Defaults to (144, 255).
+        dilate_size (int, optional): size of dilation kernel. Defaults to 5.
+        dilate_iter (float, optional): iteration of dilation. Defaults to 1.5.
+
+    Returns:
+        `np.ndarray`: 0,1 np.uint8
+    """
+    gray = cv2.cvtColor(frame, cv2.COLOR_RGB2GRAY) ### use only the green channel
+    im_blur_3 = cv2.GaussianBlur(gray,k1,5)
+    im_blur_8 = cv2.GaussianBlur(gray,k2,5)
+    im_blur_sub = im_blur_8 - im_blur_3 + 128
+    blur_mask = cv2.inRange(im_blur_sub, mask_range[0], mask_range[1])
+
+    kernel = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, ksize=(dilate_size, dilate_size))
+    mask = cv2.dilate(blur_mask, kernel, iterations=dilate_iter)
+    return mask
+
 
 def find_marker_debug(frame, mask_range=(144, 255), gkern_length=5, gkern_sig=1.5):
     """find markers in the tactile iamge
@@ -173,6 +202,32 @@ def find_marker_debug(frame, mask_range=(144, 255), gkern_length=5, gkern_sig=1.
     mask = (mask).astype('uint8')
 
     return gray, im_blur_3, im_blur_8, im_blur_sub, blur_mask, template, nrmcrimg, mask
+
+
+def find_marker_debug2(frame, mask_range=(144, 255), dilate_size=5, dilate_iter=1, k1=(3,3), k2=(15,15)):
+    """find markers in the tactile iamge
+
+    Args:
+        frame (`np.ndarray`): raw image
+        mask_range (tuple, optional): range of guassian difference. Defaults to (144, 255).
+        dilate_size (int, optional): size of dilation kernel. Defaults to 5.
+        dilate_iter (float, optional): iteration of dilation. Defaults to 1.5.
+
+    Returns:
+        `np.ndarray`: 0,1 np.uint8
+    """
+    gray = cv2.cvtColor(frame, cv2.COLOR_RGB2GRAY) ### use only the green channel
+    value = cv2.cvtColor(frame, cv2.COLOR_RGB2HSV)[...,-1]
+    im_blur_3 = cv2.GaussianBlur(gray,k1,5)
+    im_blur_8 = cv2.GaussianBlur(gray, k2,5)
+    im_blur_sub = im_blur_8 - im_blur_3 + 128
+    blur_mask = cv2.inRange(im_blur_sub, mask_range[0], mask_range[1])
+
+    kernel = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, ksize=(dilate_size, dilate_size))
+    value_mask = value < 70
+    mask = np.array(255*np.logical_and(blur_mask, value_mask), dtype=np.uint8)
+    mask = cv2.dilate(mask, kernel, iterations=dilate_iter)
+    return gray, im_blur_3, im_blur_8, im_blur_sub, blur_mask, mask, value, value_mask
 
 def marker_center(mask, frame):
 
