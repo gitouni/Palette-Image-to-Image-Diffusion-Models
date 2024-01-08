@@ -3,24 +3,23 @@
     "gpu_ids": [0], 
     "seed" : -1, 
     "finetune_norm": false, 
-    "save_suffix": ".png",
+    "save_suffix": ".bmp",
     "path": {
         "base_dir": "experiments",
         "code": "code",
         "tb_logger": "tb_logger",
         "results": "results",
         "checkpoint": "checkpoint",
-        "resume_state": "checkpoints/vitac"
+        "resume_state": "checkpoints/rand_lmarker"
     },
 
     "datasets": {
         "train": { 
             "which_dataset": {
-                "name": ["data.dataset","CropInpaintDataset"],
+                "name": ["data.dataset", "InpaintDataset"],
                 "args":{
-                    "data_root": "experiments/test_inpainting_tactile_231216_015516/results/test/0",
-                    "mask_root": "dataset/vitac/smarker",
-                    "glob_fmt": "Out_*",
+                    "data_root": "dataset/taxim/wmarker_256",
+                    "mask_root": "dataset/taxim/marker_256",
                     "data_len": -1,
                     "mask_config": {
                         "mask_mode": "file_dilate",
@@ -33,11 +32,11 @@
                 } 
             },
             "dataloader":{
-                "validation_split": 0.15,
+                "validation_split": 0,
                 "args":{ 
                     "batch_size": 3, 
                     "num_workers": 4,
-                    "shuffle": true,
+                    "shuffle": false,
                     "pin_memory": true,
                     "drop_last": true
                 },
@@ -52,19 +51,18 @@
         },
         "test": {   
             "which_dataset": {
-                "name": ["data.dataset","PatchInapintDataset"],
+                "name": ["data.dataset", "InpaintDataset"],
                 "args":{
-                    "data_root": "dataset/vitac/te_simg",
-                    "mask_root": "dataset/vitac/te_smarker",
+                    "data_root": "dataset/taxim/wmarker_256",
+                    "mask_root": "dataset/taxim/marker_256",
                     "mask_config": {
                         "mask_mode": "file_dilate",
                         "mask_dilate":{
-                            "size": [5, 5],
-                            "iteration": 2
+                            "size": [3, 3],
+                            "iteration": 1
                         }
                     },
-                    "image_size": [256, 256],
-                    "overlap": [36, 36]
+                    "image_size": [256, 256]
                 }
             },
             "dataloader":{
