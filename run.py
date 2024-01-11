@@ -68,7 +68,7 @@ def main_worker(gpu, ngpus_per_node, opt):
     try:
         if opt['phase'] == 'train':
             model.train()
-            if semi_mode:
+            if semi_mode and (not opt['no_test']):
                 opt['phase'] = 'test'
                 model.update_loader(opt)
                 model.iter = 0
@@ -95,6 +95,7 @@ if __name__ == '__main__':
     parser = argparse.ArgumentParser()
     parser.add_argument('-c', '--config', type=str, default='config/nmk_rand.json', help='JSON file for configuration')
     parser.add_argument('-p', '--phase', type=str, choices=['train','test','semi'], help='Run train, test or semi', default='train')
+    parser.add_argument('-nt','--no_test', action="store_true")
     parser.add_argument('-b', '--batch', type=int, default=None, help='Batch size in every gpu')
     parser.add_argument('-gpu', '--gpu_ids', type=str, default=None)
     parser.add_argument('-d', '--debug', action='store_true')

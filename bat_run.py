@@ -3,7 +3,7 @@ import argparse
 
 def options():
     parser = argparse.ArgumentParser()
-    parser.add_argument("--config_list",type=str,nargs="+",default=["config/nmk_rand.json","config/taxim_m1.json","config/taxim_m2.json","config/mk_rand.json"])
+    parser.add_argument("--config_list",type=str,nargs="+",default=["config/slip/cable1.json","config/slip/key3.json","config/slip/nail1.json","config/slip/skewdriver1.json"])
     parser.add_argument("--phase",type=str,choices=['test','train'],default='test')
     return parser.parse_args()
 
