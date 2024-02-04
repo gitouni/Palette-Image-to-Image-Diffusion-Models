@@ -5,6 +5,7 @@ from functools import partial
 import numpy as np
 from tqdm import tqdm
 from core.base_network import BaseNetwork
+
 class Network(BaseNetwork):
     def __init__(self, unet, beta_schedule, module_name='sr3', **kwargs):
         super(Network, self).__init__(**kwargs)
@@ -85,7 +86,7 @@ class Network(BaseNetwork):
         return model_mean + noise * (0.5 * model_log_variance).exp()
 
     @torch.no_grad()
-    def restoration(self, y_cond, y_t=None, y_0=None, mask=None, sample_num=8):
+    def restoration(self, y_cond, y_t=None, y_0=None, mask=None, sample_num=8, return_visuals=True):
         b, *_ = y_cond.shape
 
         assert self.num_timesteps > sample_num, 'num_timesteps must greater than sample_num'
@@ -100,15 +101,17 @@ class Network(BaseNetwork):
                 y_t = y_0*(1.-mask) + mask*y_t
             if i % sample_inter == 0:
                 ret_arr = torch.cat([ret_arr, y_t], dim=0)
-        return y_t, ret_arr
+        if not return_visuals:
+            return y_t  # output
+        return y_t, ret_arr  # visuals
 
     def forward(self, y_0, y_cond=None, mask=None, noise=None):
         # sampling from p(gammas)
         b, *_ = y_0.shape
-        t = torch.randint(1, self.num_timesteps, (b,), device=y_0.device).long()
-        gamma_t1 = extract(self.gammas, t-1, x_shape=(1, 1))
-        sqrt_gamma_t2 = extract(self.gammas, t, x_shape=(1, 1))
-        sample_gammas = (sqrt_gamma_t2-gamma_t1) * torch.rand((b, 1), device=y_0.device) + gamma_t1
+        t = torch.randint(1, self.num_timesteps, (b,), device=y_0.device).long()  # (b,)
+        gamma_t1 = extract(self.gammas, t-1, x_shape=(1, 1))  # (b, 1, 1)
+        sqrt_gamma_t2 = extract(self.gammas, t, x_shape=(1, 1))  # (b, 1, 1)
+        sample_gammas = (sqrt_gamma_t2-gamma_t1) * torch.rand((b, 1), device=y_0.device) + gamma_t1  # gamma ~ p(gammas)
         sample_gammas = sample_gammas.view(b, -1)
 
         noise = default(noise, lambda: torch.randn_like(y_0))
@@ -133,7 +136,7 @@ def default(val, d):
         return val
     return d() if isfunction(d) else d
 
-def extract(a, t, x_shape=(1,1,1,1)):
+def extract(a:torch.Tensor, t:torch.Tensor, x_shape=(1,1,1,1)):
     b, *_ = t.shape
     out = a.gather(-1, t)
     return out.reshape(b, *((1,) * (len(x_shape) - 1)))
@@ -177,5 +180,4 @@ def make_beta_schedule(schedule, n_timestep, linear_start=1e-6, linear_end=1e-2,
     else:
         raise NotImplementedError(schedule)
     return betas
-
 

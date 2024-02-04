@@ -153,7 +153,6 @@ class Palette(BaseModel):
         self.train_metrics.reset()
         for train_data in tqdm.tqdm(self.phase_loader):
             self.set_input(train_data)
-            self.optG.param_groups['lr']
             self.optG.zero_grad()
             loss = self.netG(self.gt_image, self.cond_image, mask=self.mask)  # forward
             loss.backward()
