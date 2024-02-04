@@ -15,9 +15,11 @@ def options():
     io_parser.add_argument("--raw_input",type=str,default="results/taxim_m1/Palette/Out_0001.bmp")
     io_parser.add_argument("--raw_mask",type=str,default="dataset/taxim/marker/0001.png")
     io_parser.add_argument("--output_root",type=str,default="debug/mask_offset/")
+    io_parser.add_argument("--output_raw",type=str,default="raw.png")
     io_parser.add_argument("--cropped_ant_raw",type=str,default="cropped_ant_raw.png")
     io_parser.add_argument("--cropped_ant_marker",type=str,default="cropped_ant_marker.png")
     io_parser.add_argument("--cropped_img",type=str,default="cropped_raw.png")
+    io_parser.add_argument("--output_raw_mask",type=str,default="raw_mask.png")
     io_parser.add_argument("--cropped_mask",type=str,default="cropped_mask.png")
     io_parser.add_argument("--new_mask",type=str,default="new_mask.png")
     io_parser.add_argument("--new_with_marker",type=str,default="wmarker.png")
@@ -29,9 +31,11 @@ def options():
 
 if __name__ == "__main__":
     args = options()
+    refresh_dir(args.output_root)
     raw_input = cv2.imread(args.raw_input)
     raw_mask = cv2.imread(args.raw_mask, cv2.IMREAD_GRAYSCALE)
-    refresh_dir(args.output_root)
+    cv2.imwrite(os.path.join(args.output_root, args.output_raw), raw_input)
+    cv2.imwrite(os.path.join(args.output_root, args.output_raw_mask), raw_mask)
     H, W = raw_mask.shape
     mask_yx = np.nonzero(raw_mask)  # y,x
     new_mask_yx = [mask_yx[0]+args.offset[0], mask_yx[1]+args.offset[1]]

@@ -24,8 +24,12 @@ def define_dataloader(logger, opt):
         dataloader_args.update({'shuffle':False}) # sampler option is mutually exclusive with shuffle 
     
     ''' create dataloader and validation dataloader '''
+    if hasattr(phase_dataset, "collate_fn"):
+        dataloader_args.update({"collate_fn":phase_dataset.collate_fn})
     dataloader = DataLoader(phase_dataset, sampler=data_sampler, worker_init_fn=worker_init_fn, **dataloader_args)
     ''' val_dataloader don't use DistributedSampler to run only GPU 0! '''
+    if hasattr(val_dataset, "collate_fn"):
+        dataloader_args.update({"collate_fn":val_dataset.collate_fn})
     if opt['global_rank']==0 and val_dataset is not None:
         dataloader_args.update(opt['datasets'][opt['phase']]['dataloader'].get('val_args',{}))
         val_dataloader = DataLoader(val_dataset, worker_init_fn=worker_init_fn, **dataloader_args) 

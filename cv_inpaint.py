@@ -8,9 +8,10 @@ def options():
     parser = argparse.ArgumentParser()
     parser.add_argument("--_continue",type=bool,default=False)
     io_parser = parser.add_argument_group()
-    io_parser.add_argument("--input_dir",type=str,default="dataset/slip_sp/markered")
-    io_parser.add_argument("--marker_dir",type=str,default="dataset/slip_sp/marker")
-    io_parser.add_argument("--inpaint_dir",type=str,default="dataset/slip_sp/TELEA")
+    io_parser.add_argument("--input_dir",type=str,default="dataset/train_val/rand_wmarker2")
+    io_parser.add_argument("--marker_dir",type=str,default="dataset/train_val/rand_marker2")
+    io_parser.add_argument("--inpaint_dir",type=str,default="results/nmk_rand_m2/TELEA")
+    io_parser.add_argument("--save_fmt",type=str,default=".bmp")
     run_parser = parser.add_argument_group()
     run_parser.add_argument("--dilate",type=bool,default=True)
     run_parser.add_argument("--kernel_size",type=int,default=3)
@@ -31,5 +32,5 @@ if __name__ == "__main__":
             marker_img = cv2.dilate(marker_img, kernel)
         H, W = img.shape[:2]
         inpaint_img = cv2.inpaint(img, marker_img,args.kernel_size,cv2.INPAINT_TELEA)
-        cv2.imwrite(os.path.join(args.inpaint_dir, os.path.splitext(img_file)[0]+".png"), inpaint_img)
+        cv2.imwrite(os.path.join(args.inpaint_dir, os.path.splitext(img_file)[0]+args.save_fmt), inpaint_img)
         
