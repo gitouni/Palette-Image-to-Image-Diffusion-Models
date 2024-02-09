@@ -173,7 +173,7 @@ class CropInpaintDataset(InpaintDataset):
     def get_mask(self, index:int):
         return super().get_mask(index, resize=False)
     
-class PatchInapintDataset(InpaintDataset):
+class PatchInpaintDataset(InpaintDataset):
     def __init__(self, data_root, glob_fmt="", mask_root="", mask_config={}, data_len=-1, buffer_size=5, image_size=[256, 256], overlap=[30,30], loader=pil_loader):
         super().__init__(data_root, glob_fmt, mask_root, mask_config, data_len, image_size, loader)
         self.tfs = transforms.Compose([
