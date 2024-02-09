@@ -9,7 +9,7 @@ import core.util as Util
 from data import define_dataloader
 from models import create_model, define_network, define_loss, define_metric
 from models.model import Palette
-from data.dataset import PatchInapintDataset
+from data.dataset import PatchInpaintDataset
 
 
 def main_worker(gpu, ngpus_per_node, opt):
@@ -61,7 +61,7 @@ def main_worker(gpu, ngpus_per_node, opt):
     )
 
     phase_logger.info('Begin model {}.'.format(opt['phase']))
-    if isinstance(phase_loader.dataset, PatchInapintDataset):
+    if isinstance(phase_loader.dataset, PatchInpaintDataset):
         setattr(model, 'patch_idx', phase_loader.dataset.patch_idx)
         setattr(model, 'patch_num', phase_loader.dataset.patch_num)
         setattr(model, 'target_img_size', phase_loader.dataset.image_size)
@@ -73,7 +73,7 @@ def main_worker(gpu, ngpus_per_node, opt):
                 model.update_loader(opt)
                 model.iter = 0
                 model.epoch = 0
-                if isinstance(model.phase_loader.dataset, PatchInapintDataset):
+                if isinstance(model.phase_loader.dataset, PatchInpaintDataset):
                     setattr(model, 'patch_idx', model.phase_loader.dataset.patch_idx)
                     setattr(model, 'patch_num', model.phase_loader.dataset.patch_num)
                     setattr(model, 'target_img_size', model.phase_loader.dataset.image_size)
@@ -81,7 +81,7 @@ def main_worker(gpu, ngpus_per_node, opt):
                 else:
                     model.test()
         elif opt['phase'] == 'test':
-            if isinstance(phase_loader.dataset, PatchInapintDataset):
+            if isinstance(phase_loader.dataset, PatchInpaintDataset):
                 model.patch_test()
             else:
                 model.test()
