@@ -12,7 +12,7 @@ import sys
 sys.path.append(os.path.join("..", os.path.dirname(__file__)))
 sys.path.append(os.path.join("../..", os.path.dirname(__file__)))
 from core.util import patchidx
-
+from typing import Tuple
 
 IMG_EXTENSIONS = [
     '.jpg', '.JPG', '.jpeg', '.JPEG',
@@ -38,6 +38,73 @@ def make_dataset(dir):
 
 def pil_loader(path, mode='RGB'):
     return Image.open(path).convert(mode)
+
+class TransformPILtoRGBTensor:
+    def __call__(self, img):
+        assert isinstance(img,Image.Image), 'Input is not a PIL.Image'
+        width, height = img.size
+        img = torch.ByteTensor(torch.ByteStorage.from_buffer(img.tobytes())).view(height, width, 3)
+        img = img.permute(2, 0, 1)
+        return img
+class ImageDataset(data.Dataset):
+    def __init__(self, data_root:str, glob_fmt="", data_len=-1, loader=pil_loader) -> None:
+        if not glob_fmt:
+            imgs = make_dataset(data_root)
+        else:
+            imgs = [str(path) for path in Path(data_root).glob(glob_fmt)]
+            imgs.sort()
+        if data_len > 0:
+            self.imgs = imgs[:int(data_len)]
+        else:
+            self.imgs = imgs
+        self.tfs = TransformPILtoRGBTensor()
+        self.loader = loader
+    
+    def __getitem__(self, index:int) -> torch.Tensor:
+        path:str = self.imgs[index]
+        img = self.tfs(self.loader(path))
+        return img
+    
+    def __len__(self):
+        return len(self.imgs)
+    
+class PatchImageDataset(ImageDataset):
+    def __init__(self, patch_size:Tuple[int,int], overlap:Tuple[int,int], buffer_size:int, data_root: str, glob_fmt="", data_len=-1, loader=pil_loader) -> None:
+        super().__init__(data_root, glob_fmt, data_len, loader)
+        ex_img = pil_loader(self.imgs[0])
+        self.image_size = ex_img.height, ex_img.width
+        self.patch_size = patch_size
+        self.patch_hidx, self.patch_widx = patchidx(self.image_size, self.patch_size, overlap)
+        self.patch_idx = []
+        for hidx in self.patch_hidx:
+            for widx in self.patch_widx:
+                self.patch_idx.append((hidx, widx))
+        self.patch_num = len(self.patch_idx)
+        self.idx_buffer = Queue(buffer_size)  # adaptive to multiprocessing
+        self.buffer = dict()
+
+    def __getitem__(self, index:int) -> torch.Tensor:
+        if index > self.__len__():
+            raise IndexError("index ({}) > len ({})".format(index, self.__len__()))
+        file_index = int(index / self.patch_num)
+        patch_idx = index % self.patch_num
+        
+        if file_index not in self.buffer.keys():
+            img = super().__getitem__(file_index)
+            self.buffer[file_index] = img
+            self.idx_buffer.put(file_index)
+            if self.idx_buffer.full():
+                removed_idx = self.idx_buffer.get(timeout=1.0)
+                self.buffer.pop(removed_idx)
+        else:
+            img = self.buffer[file_index]
+        hidx, widx = self.patch_idx[patch_idx]
+        dh = self.patch_size[0]
+        dw = self.patch_size[1]
+        return img[...,hidx:hidx+dh, widx:widx+dw]
+    
+    def __len__(self):
+        return super().__len__() * len(self.patch_idx)
 
 class InpaintDataset(data.Dataset):
     def __init__(self, data_root, glob_fmt="", mask_root="", mask_config={}, data_len=-1, image_size=[256, 256], loader=pil_loader):
