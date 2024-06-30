@@ -4,7 +4,7 @@ from core.base_model import BaseModel
 from core.logger import LogTracker
 import copy
 from core.util import patch2img
-from pytorch_warmup import LinearWarmup
+# from pytorch_warmup import LinearWarmup
 
 class EMA():
     def __init__(self, beta=0.9999):
@@ -42,10 +42,11 @@ class Palette(BaseModel):
 
         self.optG = torch.optim.Adam(list(filter(lambda p: p.requires_grad, self.netG.parameters())), **optimizers[0])
         self.optimizers.append(self.optG)
-        if len(optimizers) > 1:
-            self.warmup_lr = LinearWarmup(self.optG, **optimizers[1])
-        else:
-            self.warmup_lr = None
+        # if len(optimizers) > 1:
+        #     self.warmup_lr = LinearWarmup(self.optG, **optimizers[1])
+        # else:
+        #     self.warmup_lr = None
+        self.warmup_lr = None
         self.resume_training() 
 
         if self.opt['distributed']:

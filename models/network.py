@@ -5,9 +5,24 @@ from functools import partial
 import numpy as np
 from tqdm import tqdm
 from core.base_network import BaseNetwork
+from models.dpm import NoiseScheduleVP, model_wrapper, DPM_Solver
+from typing import Literal
 
 class Network(BaseNetwork):
-    def __init__(self, unet, beta_schedule, module_name='sr3', **kwargs):
+    def __init__(self, unet, beta_schedule, module_name='sr3',
+            solver_type:Literal['ddpm','dpm']='dpm',
+            solver_argv:dict=dict(steps=20,
+                order=3,  # no guidance (3), with guidance (2)
+                skip_type="time_uniform",
+                method="multistep",
+                lower_order_final=False,
+                denoise_to_zero=False,
+                solver_type="dpmsolver",
+                atol=0.0078,
+                rtol=0.05),
+            model_wrapper_argv:dict=dict(model_type="noise",
+                                    guidance_type="uncond"),
+             **kwargs):
         super(Network, self).__init__(**kwargs)
         if module_name == 'sr3':
             from .sr3_modules.unet import UNet
@@ -16,6 +31,9 @@ class Network(BaseNetwork):
         
         self.denoise_fn = UNet(**unet)
         self.beta_schedule = beta_schedule
+        self.solver_type = solver_type
+        self.solver_argv = solver_argv
+        self.model_wrapper_argv = model_wrapper_argv
 
     def set_loss(self, loss_fn):
         self.loss_fn = loss_fn
@@ -34,6 +52,7 @@ class Network(BaseNetwork):
         gammas_prev = np.append(1., gammas[:-1])
 
         # calculations for diffusion q(x_t | x_{t-1}) and others
+        self.register_buffer('betas',to_torch(betas))
         self.register_buffer('gammas', to_torch(gammas))
         self.register_buffer('sqrt_recip_gammas', to_torch(np.sqrt(1. / gammas)))
         self.register_buffer('sqrt_recipm1_gammas', to_torch(np.sqrt(1. / gammas - 1)))
@@ -78,17 +97,25 @@ class Network(BaseNetwork):
             (1 - sample_gammas).sqrt() * noise
         )
 
-    @torch.no_grad()
+    @torch.inference_mode()
     def p_sample(self, y_t, t, clip_denoised=True, y_cond=None):
         model_mean, model_log_variance = self.p_mean_variance(
             y_t=y_t, t=t, clip_denoised=clip_denoised, y_cond=y_cond)
         noise = torch.randn_like(y_t) if any(t>0) else torch.zeros_like(y_t)
         return model_mean + noise * (0.5 * model_log_variance).exp()
 
-    @torch.no_grad()
-    def restoration(self, y_cond, y_t=None, y_0=None, mask=None, sample_num=8, return_visuals=True):
-        b, *_ = y_cond.shape
+    @torch.inference_mode()
+    def restoration(self, y_cond:torch.Tensor, y_t=None, y_0=None, mask=None, sample_num=8, return_visuals=True):
+        if self.solver_type.lower() == 'ddpm':
+            return self.ddpm_solver(y_cond, y_t, y_0, mask, sample_num, return_visuals)
+        elif self.solver_type.lower() == 'dpm':
+            return self.dpm_solver(y_cond, y_t, y_0, mask, sample_num, return_visuals)
+        else:
+            raise NotImplementedError()
 
+    @torch.inference_mode()
+    def ddpm_solver(self, y_cond:torch.Tensor, y_t=None, y_0=None, mask=None, sample_num=8, return_visuals=True):
+        b, *_ = y_cond.shape
         assert self.num_timesteps > sample_num, 'num_timesteps must greater than sample_num'
         sample_inter = (self.num_timesteps//sample_num)
         
@@ -104,7 +131,37 @@ class Network(BaseNetwork):
         if not return_visuals:
             return y_t  # output
         return y_t, ret_arr  # visuals
-
+    
+    @torch.inference_mode()
+    def dpm_solver(self, y_cond:torch.Tensor, y_t=None, y_0=None, mask=None, *args):
+        def model_fn(y_t, t, y_cond, y_0, mask):
+            noise_level = extract(self.gammas, t.to(torch.int64), x_shape=(1, 1)).to(y_t.device)
+            y_noisy = y_t*mask+(1.-mask)*y_0
+            out = self.denoise_fn(torch.cat([y_cond, y_noisy], dim=1), noise_level)
+            # If the model outputs both 'mean' and 'variance' (such as improved-DDPM and guided-diffusion),
+            # We only use the 'mean' output for DPM-Solver, because DPM-Solver is based on diffusion ODEs.
+            return out
+        y_t = default(y_t, lambda: torch.randn_like(y_cond))
+        noise_schedule = NoiseScheduleVP(schedule='discrete', alphas_cumprod=self.gammas)
+        model_fn_continuous = model_wrapper(
+            model_fn,
+            noise_schedule,
+            model_kwargs={"y_cond":y_cond, "y_0":y_0, "mask":mask},
+            **self.model_wrapper_argv
+        )
+        dpm_solver = DPM_Solver(
+            model_fn_continuous,
+            noise_schedule,
+            algorithm_type="dpmsolver++"
+        )
+        y_0p = dpm_solver.sample(
+            y_t,
+            **self.solver_argv
+        )
+        if mask is not None:
+            y_0p = y_0*(1.-mask) + mask * y_0p
+        return y_0p
+    
     def forward(self, y_0, y_cond=None, mask=None, noise=None):
         # sampling from p(gammas)
         b, *_ = y_0.shape
